@@ -113,7 +113,20 @@ def do_sync(args):
         # will only sync records of subscribers that are present in the list.
         # Hence, for different start dates the 'SubscriberKey' list will differ and
         # thus 'subscribers' records will also be different for different start dates.
+
+        # if 'subscriber' stream is selected always select 'subscriber_list'
         if SubscriberDataAccessObject.matches_catalog(stream_catalog):
+            if not list_subscriber_selected:
+                list_subscriber_selected = True
+
+                list_subscriber_catalog = [c for c in catalog.get("streams") if c.get("tap_stream_id") == "list_subscriber"][0]
+                mdata = metadata.to_map(list_subscriber_catalog['metadata'])
+                mdata = metadata.write(mdata, (), 'selected', True)
+                list_subscriber_catalog['metadata'] = metadata.to_list(mdata)
+
+                stream_accessors.append(ListSubscriberDataAccessObject(
+                    config, state, auth_stub, list_subscriber_catalog))
+
             subscriber_selected = True
             subscriber_catalog = stream_catalog
             LOGGER.info("'subscriber' selected, will replicate via "
@@ -123,6 +136,7 @@ def do_sync(args):
         if ListSubscriberDataAccessObject.matches_catalog(stream_catalog):
             list_subscriber_selected = True
 
+
         for available_stream_accessor in AVAILABLE_STREAM_ACCESSORS:
             if available_stream_accessor.matches_catalog(stream_catalog):
                 stream_accessors.append(available_stream_accessor(
@@ -130,12 +144,6 @@ def do_sync(args):
 
                 break
 
-    # do not replicate 'subscriber' stream without selecting 'list_subscriber' stream
-    if subscriber_selected and not list_subscriber_selected:
-        LOGGER.fatal('Cannot replicate `subscriber` without '
-                     '`list_subscriber`. Please select `list_subscriber` '
-                     'and try again.')
-        sys.exit(1)
 
     for stream_accessor in stream_accessors:
         if isinstance(stream_accessor, ListSubscriberDataAccessObject) and \
