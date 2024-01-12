@@ -13,8 +13,8 @@ setup(
     install_requires=[
         'funcy==2.0',
         'singer-python==5.12.1',
-        'python-dateutil==2.6.0',
-        'voluptuous==0.13.1',
+        'python-dateutil==2.8.2',
+        'voluptuous==0.14.1',
         'Salesforce-FuelSDK @ git+https://github.com/hotgluexyz/FuelSDK-Python.git#egg=Salesforce-FuelSDK', # USING THE HOTGLUE VERSION
     ],
     extras_require={
