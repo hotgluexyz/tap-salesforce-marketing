@@ -166,11 +166,11 @@ def request_from_cursor(name, cursor, batch_size):
     while response.more_results:
         LOGGER.info("Getting more results from '{}' endpoint".format(name))
 
-        if isinstance(cursor, FuelSDK.ET_Campaign):
-            # use 'getMoreResults' for campaigns as it does not use
-            # batch_size, rather it uses $page and $pageSize and REST Call
+        try:
+            # use 'getMoreResults' as default as most entities don't use batch_size
+            # it uses $page and $pageSize and REST Call, gets 2500 fields per call
             response = cursor.getMoreResults()
-        else:
+        except:
             # Override call to getMoreResults to add a batch_size parameter
             # response = cursor.getMoreResults()
             response = tap_exacttarget__getMoreResults(cursor, batch_size=batch_size)
