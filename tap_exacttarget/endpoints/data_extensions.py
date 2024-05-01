@@ -44,6 +44,32 @@ def _get_extension_name_from_tap_stream_id(tap_stream_id):
 
 class DataExtensionDataAccessObject(DataAccessObject):
 
+    # data view are built-in data extensions in SFMC but are not accesibble through API according to SFMC support
+    # https://mateuszdabrowski.pl/docs/config/sfmc-system-data-views/
+    data_view_extensions = [
+        "_Subscribers",
+        "_EnterpriseAttribute",
+        "_Job",
+        "_Sent",
+        "_Open",
+        "_Click",
+        "_Bounce",
+        "_Complaint",
+        "_Unsubscribe",
+        "_BusinessUnitUnsubscribes",
+        "_ListSubscribers",
+        "_Journey",
+        "_JourneyActivity",
+        "_AutomationInstance",
+        "_AutomationActivityInstance",
+        "_MobileAddress",
+        "_MobileSubscription",
+        "_SubscriberSMS",
+        "_SMSSubscriptionLog",
+        "_SMSMessageTracking",
+        "_UndeliverableSMS",
+    ]
+
     @classmethod
     def matches_catalog(cls, catalog):
         return 'data_extension.' in catalog.get('stream')
@@ -62,6 +88,9 @@ class DataExtensionDataAccessObject(DataAccessObject):
         to_return = {}
 
         for extension in result:
+            # not include Data View in data_extensions, as SFMC support said those can't be fetched
+            if extension["Name"] in self.data_view_extensions:
+                continue
             extension_name = str(extension.Name)
             customer_key = str(extension.CustomerKey)
 
@@ -184,6 +213,8 @@ class DataExtensionDataAccessObject(DataAccessObject):
                         'metadata': {'inclusion': 'automatic'}
                     })
                 else:
+                    if "metadata" not in to_return[extension_id]:
+                        to_return[extension_id]["metadata"] = []
                     to_return[extension_id]['metadata'].append({
                         'breadcrumb': ('properties', field_name),
                         'metadata': {'inclusion': 'available'}
@@ -220,7 +251,10 @@ class DataExtensionDataAccessObject(DataAccessObject):
                 if not mdata.get('breadcrumb'):
                     if not mdata.get('metadata').get('valid-replication-keys'):
                         del mdata.get('metadata')['valid-replication-keys']
-        return to_return
+        
+        # not include data views data extensions
+        filtered_data_extensions = {k:v for k,v in to_return.items() if "stream" in v}
+        return filtered_data_extensions
 
     def generate_catalog(self):
         # get all the data extensions by requesting all the fields
