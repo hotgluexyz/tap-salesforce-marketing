@@ -44,35 +44,42 @@ def _get_extension_name_from_tap_stream_id(tap_stream_id):
 
 class DataExtensionDataAccessObject(DataAccessObject):
 
-    # data view are built-in data extensions in SFMC but are not accesibble through API according to SFMC support
-    # https://mateuszdabrowski.pl/docs/config/sfmc-system-data-views/
-    data_view_extensions = [
-        "_Subscribers",
-        "_EnterpriseAttribute",
-        "_Job",
-        "_Sent",
-        "_Open",
-        "_Click",
-        "_Bounce",
-        "_Complaint",
-        "_Unsubscribe",
-        "_BusinessUnitUnsubscribes",
-        "_ListSubscribers",
-        "_Journey",
-        "_JourneyActivity",
-        "_AutomationInstance",
-        "_AutomationActivityInstance",
-        "_MobileAddress",
-        "_MobileSubscription",
-        "_SubscriberSMS",
-        "_SMSSubscriptionLog",
-        "_SMSMessageTracking",
-        "_UndeliverableSMS",
-    ]
+    valid_data_extensions = []
 
     @classmethod
     def matches_catalog(cls, catalog):
         return 'data_extension.' in catalog.get('stream')
+    
+    def is_data_view(self, name):
+        # data view are built-in data extensions in SFMC but are not accesibble through API according to SFMC support
+        # https://mateuszdabrowski.pl/docs/config/sfmc-system-data-views/
+
+        data_view_extensions = [
+            "_EnterpriseAttribute",
+            "_Job",
+            "_Sent",
+            "_Open",
+            "_Click",
+            "_Bounce",
+            "_Complaint",
+            "_Unsubscribe",
+            "_BusinessUnitUnsubscribes",
+            "_ListSubscribers",
+            "_Journey",
+            "_Automation",
+            "_Mobile",
+            "_Subscriber",
+            "_SMS",
+            "_Undeliverable",
+            "_Push",
+            "_MobileLine",
+            "MobileLine",
+            "abandoned_"
+        ]
+
+        # The criteria to filter data extensions is based on  https://salesforce.stackexchange.com/questions/330717/identifying-system-data-extensions
+        # Where it says that data views can only be identified by checking the documented DE in SFMC, other sources,or checking if they start with underscore or with "abandoned_"
+        return any(name.startswith(prefix) for prefix in data_view_extensions)
 
     # get list of all the data extensions created by the user
     @exacttarget_error_handling
@@ -84,13 +91,15 @@ class DataExtensionDataAccessObject(DataAccessObject):
             props=['CustomerKey', 'Name'],
             batch_size=self.batch_size
         )
-
         to_return = {}
 
         for extension in result:
             # not include Data View in data_extensions, as SFMC support said those can't be fetched
-            if extension["Name"] in self.data_view_extensions:
+            if self.is_data_view(extension["Name"]):
                 continue
+            else:
+                self.valid_data_extensions.append(extension["CustomerKey"])
+
             extension_name = str(extension.Name)
             customer_key = str(extension.CustomerKey)
 
@@ -159,6 +168,9 @@ class DataExtensionDataAccessObject(DataAccessObject):
         #       update catalog file by appending that field in 'valid-replication-keys'
         #   add 'AUTOMATIC' replication method for both primary and replication keys
         for field in result:
+            # only process fields for valid data extensions
+            if field["DataExtension"]["CustomerKey"] not in self.valid_data_extensions:
+                continue
             is_replication_key = False
             is_primary_key = False
             # the date extension in which the fields is present
