@@ -196,6 +196,8 @@ class DataExtensionDataAccessObject(DataAccessObject):
                 ],
                 'description': str(field.get('Description')),
             }
+            if field.get('FieldType') in ["Date"]:
+                field_schema["format"] = "date-time"
 
             to_return = set_in(
                 to_return,
