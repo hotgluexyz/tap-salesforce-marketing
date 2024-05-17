@@ -7,7 +7,7 @@
         },
         "EventDate": {
             "type": ["null", "string"],
-            "format": "datetime",
+            "format": "date-time",
             "description": "Date when a tracking event occurred."
         },
         "EventType": {
