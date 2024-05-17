@@ -86,6 +86,7 @@
         },
         "UnsubscribedDate": {
             "type": ["null", "string"],
+            "format": "date-time",
             "description": "Represents date subscriber unsubscribed from a list."
         }
     }

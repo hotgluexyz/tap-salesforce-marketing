@@ -16,10 +16,12 @@
     },
     "CREATED_DATE_FIELD": {
         "type": ["null", "string"],
+        "format": "date-time",
         "description": "Read-only date and time of the object's creation."
     },
     "MODIFIED_DATE_FIELD": {
         "type": ["null", "string"],
+        "format": "date-time",
         "description": "Indicates the last time object information was modified."
     },
     "CUSTOMER_KEY_FIELD": {

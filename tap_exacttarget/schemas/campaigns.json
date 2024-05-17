@@ -5,10 +5,10 @@
             "type": ["null", "string"]
         },
         "createdDate": {
-            "type": ["null", "string"]
+            "$ref": "definitions.json#/CREATED_DATE_FIELD"
         },
         "modifiedDate": {
-            "type": ["null", "string"]
+            "$ref": "definitions.json#/MODIFIED_DATE_FIELD"
         },
         "name": {
             "type": ["null", "string"]
