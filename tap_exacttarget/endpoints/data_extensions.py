@@ -88,7 +88,7 @@ class DataExtensionDataAccessObject(DataAccessObject):
             'DataExtension',
             FuelSDK.ET_DataExtension,
             self.auth_stub,
-            props=['CustomerKey', 'Name'],
+            props=['CustomerKey', 'Name', "Client.ID"],
             batch_size=self.batch_size
         )
         to_return = {}
@@ -329,7 +329,7 @@ class DataExtensionDataAccessObject(DataAccessObject):
     def _replicate(self, customer_key, keys,
                    parent_category_id, table,
                    partial=False, start=None,
-                   end=None, unit=None, replication_key=None):
+                   end=None, unit=None, replication_key=None, parent_mid=None):
         if partial:
             LOGGER.info("Fetching {} from {} to {}"
                         .format(table, start, end))
@@ -347,7 +347,7 @@ class DataExtensionDataAccessObject(DataAccessObject):
                                                  unit)
 
         result = request_from_cursor('DataExtensionObject', cursor,
-                                     batch_size=self.batch_size)
+                                     batch_size=self.batch_size, parent_mid=parent_mid)
 
         catalog_copy = copy.deepcopy(self.catalog)
 
@@ -409,11 +409,12 @@ class DataExtensionDataAccessObject(DataAccessObject):
                 'SimpleOperator': 'equals',
                 'Value': customer_key,
             },
-            props=['CustomerKey', 'CategoryID'],
+            props=['CustomerKey', 'CategoryID', "Client.ID"],
             batch_size=self.batch_size)
 
         parent_extension = next(parent_result)
         parent_category_id = parent_extension.CategoryID
+        parent_mid = parent_extension.Client.ID
 
         while before_now(start) or replication_key is None:
             self._replicate(
@@ -425,7 +426,8 @@ class DataExtensionDataAccessObject(DataAccessObject):
                 start=start,
                 end=end,
                 unit=unit,
-                replication_key=replication_key)
+                replication_key=replication_key,
+                parent_mid=parent_mid)
 
             if replication_key is None:
                 return

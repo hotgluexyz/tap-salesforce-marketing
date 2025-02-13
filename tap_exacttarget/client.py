@@ -144,7 +144,7 @@ def request(name, selector, auth_stub, search_filter=None, props=None, batch_siz
     return request_from_cursor(name, cursor, batch_size)
 
 
-def request_from_cursor(name, cursor, batch_size):
+def request_from_cursor(name, cursor, batch_size, parent_mid=None):
     """
     Given an object name (`name`), used for logging purposes only, and a
     `cursor` provided by FuelSDK, return a generator that yields all the
@@ -154,6 +154,9 @@ def request_from_cursor(name, cursor, batch_size):
     to be customized. See tap_exacttarget.endpoints.data_extensions for
     an example.
     """
+    if cursor.obj_type == "DataExtensionObject":
+        cursor.parent_mid = parent_mid
+
     response = cursor.get()
 
     if not response.status:
