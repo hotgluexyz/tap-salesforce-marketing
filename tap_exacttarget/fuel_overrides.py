@@ -56,7 +56,7 @@ class TapExacttarget__ET_DataExtension_Row(FuelSDK.ET_DataExtension_Row):
         '''
 
         # add 'options' parameter to set 'batch_size'
-        obj = FuelSDK.ET_Get(self.auth_stub, "DataExtensionObject[{0}]".format(self.Name), self.props, self.search_filter, self.options)
+        obj = FuelSDK.ET_Get(self.auth_stub, "DataExtensionObject[{0}]".format(self.Name), self.props, self.search_filter, self.options, parent_mid=self.parent_mid)
         self.last_request_id = obj.request_id
 
         return obj
