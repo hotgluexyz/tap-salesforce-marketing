@@ -412,7 +412,10 @@ class DataExtensionDataAccessObject(DataAccessObject):
             props=['CustomerKey', 'CategoryID', "Client.ID"],
             batch_size=self.batch_size)
 
-        parent_extension = next(parent_result)
+        parent_extension = next(parent_result, None)
+        if not parent_extension:
+            raise Exception(f"Data extension not found for data extension '{self.catalog.get('stream')}' with customer key {customer_key}")
+
         parent_category_id = parent_extension.CategoryID
         parent_mid = parent_extension.Client.ID
 
