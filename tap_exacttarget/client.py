@@ -154,7 +154,7 @@ def request_from_cursor(name, cursor, batch_size, parent_mid=None):
     to be customized. See tap_exacttarget.endpoints.data_extensions for
     an example.
     """
-    if cursor.obj_type == "DataExtensionObject":
+    if hasattr(cursor, "obj_type") and cursor.obj_type == "DataExtensionObject":
         cursor.parent_mid = parent_mid
 
     response = cursor.get()
