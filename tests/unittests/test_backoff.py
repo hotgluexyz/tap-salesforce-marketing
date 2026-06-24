@@ -226,22 +226,21 @@ class TestConnectionResetError(unittest.TestCase):
         # once as there is only one record
         self.assertEquals(mocked_write_records.call_count, 1)
 
-    @mock.patch("FuelSDK.rest.ET_GetSupport.get")
-    def test_connection_reset_error_occurred__events(self, mocked_get, mocked_sleep):
+    @mock.patch("tap_exacttarget.endpoints.events.sync_events")
+    def test_connection_reset_error_occurred__events(self, mocked_sync, mocked_sleep):
         """
             Test case to verify that we backoff for 5 times when 'ConnectionResetError' error occurs
         """
-        # mock 'get' and raise error
-        mocked_get.side_effect = socket.error(104, 'Connection reset by peer')
-        # make the object of 'EventDataAccessObject'
-        obj = events.EventDataAccessObject({"start_date": "2020-01-01T00:00:00Z"}, {}, None, {})
+        mocked_sync.side_effect = ConnectionError('Connection reset by peer')
+        obj = events.EventDataAccessObject({
+            "start_date": "2020-01-01T00:00:00Z",
+            "sub_domain": "example",
+        }, {}, None, {})
         try:
-            # call sync
             obj.sync_data()
         except ConnectionError:
             pass
-        # verify the code backed off and requested for 5 times
-        self.assertEquals(mocked_get.call_count, 5)
+        self.assertEquals(mocked_sync.call_count, 5)
 
     @mock.patch("FuelSDK.rest.ET_GetSupport.get")
     def test_connection_reset_error_occurred__folder(self, mocked_get, mocked_sleep):
@@ -695,22 +694,21 @@ class TestSocketTimeoutError(unittest.TestCase):
         # once as there is only one record
         self.assertEquals(mocked_write_records.call_count, 1)
 
-    @mock.patch("FuelSDK.rest.ET_GetSupport.get")
-    def test_socket_timeout_error_occurred__events(self, mocked_get, mocked_sleep):
+    @mock.patch("tap_exacttarget.endpoints.events.sync_events")
+    def test_socket_timeout_error_occurred__events(self, mocked_sync, mocked_sleep):
         """
             Test case to verify that we backoff for 5 times when 'socket.timeout' error occurs
         """
-        # mock 'get' and raise error
-        mocked_get.side_effect = socket.timeout("The read operation timed out")
-        # make the object of 'EventDataAccessObject'
-        obj = events.EventDataAccessObject({"start_date": "2020-01-01T00:00:00Z"}, {}, None, {})
+        mocked_sync.side_effect = socket.timeout("The read operation timed out")
+        obj = events.EventDataAccessObject({
+            "start_date": "2020-01-01T00:00:00Z",
+            "sub_domain": "example",
+        }, {}, None, {})
         try:
-            # call sync
             obj.sync_data()
         except socket.timeout:
             pass
-        # verify the code backed off and requested for 5 times
-        self.assertEquals(mocked_get.call_count, 5)
+        self.assertEquals(mocked_sync.call_count, 5)
 
     @mock.patch("FuelSDK.rest.ET_GetSupport.get")
     def test_socket_timeout_error_occurred__folder(self, mocked_get, mocked_sleep):
@@ -1165,22 +1163,21 @@ class TestTimeoutError(unittest.TestCase):
         # once as there is only one record
         self.assertEquals(mocked_write_records.call_count, 1)
 
-    @mock.patch("FuelSDK.rest.ET_GetSupport.get")
-    def test_timeout_error_occurred__events(self, mocked_get, mocked_sleep):
+    @mock.patch("tap_exacttarget.endpoints.events.sync_events")
+    def test_timeout_error_occurred__events(self, mocked_sync, mocked_sleep):
         """
             Test case to verify that we backoff for 5 times when 'URLError' error occurs
         """
-        # mock 'get' and raise error
-        mocked_get.side_effect = URLError('_ssl.c:1059: The handshake operation timed out')
-        # make the object of 'EventDataAccessObject'
-        obj = events.EventDataAccessObject({"start_date": "2020-01-01T00:00:00Z"}, {}, None, {})
+        mocked_sync.side_effect = URLError('_ssl.c:1059: The handshake operation timed out')
+        obj = events.EventDataAccessObject({
+            "start_date": "2020-01-01T00:00:00Z",
+            "sub_domain": "example",
+        }, {}, None, {})
         try:
-            # call sync
             obj.sync_data()
         except URLError:
             pass
-        # verify the code backed off and requested for 5 times
-        self.assertEquals(mocked_get.call_count, 5)
+        self.assertEquals(mocked_sync.call_count, 5)
 
     @mock.patch("FuelSDK.rest.ET_GetSupport.get")
     def test_timeout_error_occurred__folder(self, mocked_get, mocked_sleep):
