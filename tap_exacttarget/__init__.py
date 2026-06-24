@@ -64,6 +64,9 @@ def do_discover(args):
     catalog = []
 
     for available_stream_accessor in AVAILABLE_STREAM_ACCESSORS:
+        if available_stream_accessor is DataExtensionDataAccessObject:
+            continue
+
         stream_accessor = available_stream_accessor(
             config, state, auth_stub, None)
 
@@ -78,13 +81,21 @@ def _is_selected(catalog_entry):
                                     metadata.get(mdata, (), 'selected'),
                                     default=False)
 
+
+def _get_catalog_dict(args):
+    if args.properties:
+        return args.properties
+    if args.catalog:
+        return args.catalog.to_dict()
+    return None
+
 # run sync mode
 def do_sync(args):
     LOGGER.info("Starting sync.")
 
     config = args.config
     state = args.state
-    catalog = args.properties
+    catalog = _get_catalog_dict(args)
 
     success = True
 
@@ -174,7 +185,7 @@ def main():
 
     if args.discover:
         do_discover(args)
-    elif args.properties:
+    elif _get_catalog_dict(args):
         success = do_sync(args)
     else:
         LOGGER.info("No properties were selected")

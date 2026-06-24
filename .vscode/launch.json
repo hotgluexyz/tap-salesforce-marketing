@@ -1,0 +1,42 @@
+{
+    // https://code.visualstudio.com/docs/editor/debugging
+    // Shell redirects (e.g. > catalog.json) are not applied here—args go straight to Python.
+    // After debug, redirect in the integrated terminal if you need files on disk.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "tap-salesforce-marketing-cloud-discover",
+            "type": "python",
+            "request": "launch",
+            "program": "../tap_exacttarget/__init__.py",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--discover",
+                ">",
+                "catalog.json"
+            ],
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        },
+        {
+            "name": "tap-salesforce-marketing-cloud-get",
+            "type": "python",
+            "request": "launch",
+            "justMyCode": false,
+            "program": "../tap_exacttarget/__init__.py",
+            "cwd": "${workspaceFolder}/.secrets",
+            "args": [
+                "--config",
+                "config.json",
+                "--catalog",
+                "catalog-selected.json",
+                ">",
+                "data.singer"
+            ],
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python3"
+        }
+    ]
+}

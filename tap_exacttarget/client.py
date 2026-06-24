@@ -1,5 +1,6 @@
 import FuelSDK
 import singer
+import time
 
 from suds.transport.https import HttpAuthenticated
 from tap_exacttarget.fuel_overrides import tap_exacttarget__getMoreResults
@@ -23,6 +24,20 @@ def _get_response_items(response, name):
 __all__ = ['get_auth_stub', 'request', 'request_from_cursor']
 
 
+def _create_auth_stub(params, request_timeout):
+    auth_stub = FuelSDK.ET_Client(params=params)
+    transport = HttpAuthenticated(timeout=request_timeout)
+    auth_stub.soap_client.set_options(transport=transport)
+    return auth_stub
+
+
+def _request_timeout(config):
+    config_request_timeout = config.get('request_timeout')
+    if config_request_timeout and float(config_request_timeout):
+        return float(config_request_timeout)
+    return REQUEST_TIMEOUT
+
+
 # PUBLIC FUNCTIONS
 
 def get_auth_stub(config):
@@ -41,57 +56,35 @@ def get_auth_stub(config):
         'clientsecret': config['client_secret']
         }
 
-    if config.get('sub_domain'):
-        # For S10+ accounts: https://developer.salesforce.com/docs/atlas.en-us.noversion.mc-apis.meta/mc-apis/your-subdomain-tenant-specific-endpoints.htm
+    request_timeout = _request_timeout(config)
+    sub_domain = config.get('sub_domain')
 
-        params['authenticationurl'] = ('https://{}.auth.marketingcloudapis.com/v1/requestToken'
-                                       .format(config['sub_domain']))
+    if sub_domain:
+        params['useOAuth2Authentication'] = "True"
+        params['authenticationurl'] = (
+            'https://{}.auth.marketingcloudapis.com'.format(sub_domain))
+        params['soapendpoint'] = (
+            'https://{}.soap.marketingcloudapis.com/Service.asmx'.format(sub_domain))
         LOGGER.info("Authentication URL is: %s", params['authenticationurl'])
-        params['soapendpoint'] = ('https://{}.soap.marketingcloudapis.com/Service.asmx'
-                                  .format(config['sub_domain']))
 
-    # Set request timeout with config param `request_timeout`
-    # If value is 0, "0", "" or not passed then it set timeout to default: 300 seconds.
-    config_request_timeout = config.get('request_timeout')
-    if config_request_timeout and float(config_request_timeout):
-        request_timeout = float(config_request_timeout)
-    else:
-        request_timeout = REQUEST_TIMEOUT
-
-    # First try V1
-    try:
-        LOGGER.info('Trying to authenticate using V1 endpoint')
-        params['useOAuth2Authentication'] = "False"
-        auth_stub = FuelSDK.ET_Client(params=params)
-
-        transport = HttpAuthenticated(timeout=request_timeout)
-        auth_stub.soap_client.set_options(
-            transport=transport)
-        LOGGER.info("Success.")
-        return auth_stub
-    except Exception as e:
-        LOGGER.info('Failed to auth using V1 endpoint')
-        if not config.get('sub_domain'):
-            LOGGER.warning('No sub_domain found, will not attempt to auth with V2 endpoint')
-            message = "{}. Please check your \'client_id\', \'client_secret\' or try adding the \'sub_domain\'."
+        try:
+            LOGGER.info('Authenticating using OAuth2 endpoint')
+            auth_stub = _create_auth_stub(params, request_timeout)
+        except Exception as e:
+            LOGGER.info('Failed to auth using OAuth2 endpoint')
+            message = "{}. Please check your \'client_id\', \'client_secret\' or \'sub_domain\'."
             raise Exception(message.format(str(e))) from None
 
-    # Next try V2
-    # Move to OAuth2: https://help.salesforce.com/articleView?id=mc_rn_january_2019_platform_ip_remove_legacy_package_create_ability.htm&type=5
-    try:
-        LOGGER.info('Trying to authenticate using V2 endpoint')
-        params['useOAuth2Authentication'] = "True"
-        params['authenticationurl'] = ('https://{}.auth.marketingcloudapis.com'
-                                       .format(config['sub_domain']))
-        LOGGER.info("Authentication URL is: %s", params['authenticationurl'])
-        auth_stub = FuelSDK.ET_Client(params=params)
+        LOGGER.info("Success.")
+        return auth_stub
 
-        transport = HttpAuthenticated(timeout=request_timeout)
-        auth_stub.soap_client.set_options(
-            transport=transport)
+    try:
+        LOGGER.info('Authenticating using legacy endpoint')
+        params['useOAuth2Authentication'] = "False"
+        auth_stub = _create_auth_stub(params, request_timeout)
     except Exception as e:
-        LOGGER.info('Failed to auth using V2 endpoint')
-        message = "{}. Please check your \'client_id\', \'client_secret\' or \'sub_domain\'."
+        LOGGER.info('Failed to auth using legacy endpoint')
+        message = "{}. Please check your \'client_id\', \'client_secret\' or try adding the \'sub_domain\'."
         raise Exception(message.format(str(e))) from None
 
     LOGGER.info("Success.")
@@ -157,11 +150,29 @@ def request_from_cursor(name, cursor, batch_size, parent_mid=None):
     if hasattr(cursor, "obj_type") and cursor.obj_type == "DataExtensionObject":
         cursor.parent_mid = parent_mid
 
+    request_started = time.perf_counter()
+    timeout_seconds = REQUEST_TIMEOUT
+    soap_client = getattr(getattr(cursor, 'auth_stub', None), 'soap_client', None)
+    transport = getattr(getattr(soap_client, 'options', None), 'transport', None)
+    if transport and getattr(transport, 'timeout', None):
+        timeout_seconds = transport.timeout
+    LOGGER.info(
+        "Sending initial request to '%s' endpoint (timeout: %ss)",
+        name,
+        timeout_seconds,
+    )
+    page_started = time.perf_counter()
     response = cursor.get()
 
     if not response.status:
         raise RuntimeError("Request failed with '{}'"
                            .format(response.message))
+
+    LOGGER.info(
+        "Got initial page from '%s' endpoint in %.2fs",
+        name,
+        time.perf_counter() - page_started,
+    )
 
     for item in _get_response_items(response, name):
         yield item
@@ -169,20 +180,27 @@ def request_from_cursor(name, cursor, batch_size, parent_mid=None):
     while response.more_results:
         LOGGER.info("Getting more results from '{}' endpoint".format(name))
 
+        page_started = time.perf_counter()
         try:
-            # use 'getMoreResults' as default as most entities don't use batch_size
-            # it uses $page and $pageSize and REST Call, gets 2500 fields per call
             response = cursor.getMoreResults()
         except:
-            # Override call to getMoreResults to add a batch_size parameter
-            # response = cursor.getMoreResults()
             response = tap_exacttarget__getMoreResults(cursor, batch_size=batch_size)
 
         if not response.status:
             raise RuntimeError("Request failed with '{}'"
                                .format(response.message))
 
+        LOGGER.info(
+            "Got next page from '%s' endpoint in %.2fs",
+            name,
+            time.perf_counter() - page_started,
+        )
+
         for item in _get_response_items(response, name):
             yield item
 
-    LOGGER.info("Done retrieving results from '{}' endpoint".format(name))
+    LOGGER.info(
+        "Finished '%s' endpoint in %.2fs",
+        name,
+        time.perf_counter() - request_started,
+    )
