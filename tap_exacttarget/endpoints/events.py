@@ -69,10 +69,11 @@ class EventDataAccessObject(DataAccessObject):
             )
 
         LOGGER.info(
-            "Fetching event types %s (chunk_hours=%s, concurrency=%s)",
+            "Fetching event types %s (chunk_hours=%s, concurrency=%s, min_chunk_minutes=%s)",
             ", ".join(event_types),
-            self.config.get('events_chunk_hours', 24),
-            self.config.get('events_concurrency', 40),
+            self.config.get('events_chunk_hours', 6),
+            self.config.get('events_concurrency', 20),
+            self.config.get('events_min_chunk_minutes', 30),
         )
 
         def on_record(event_key, row):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence, Tuple
@@ -11,6 +12,14 @@ from xml.etree import ElementTree as ET
 import aiohttp
 
 NS = "http://exacttarget.com/wsdl/partnerAPI"
+
+RETRYABLE_HTTP_STATUS = {429, 500, 502, 503, 504}
+DEFAULT_EVENTS_CONCURRENCY = 20
+DEFAULT_EVENTS_CHUNK_HOURS = 6
+DEFAULT_EVENTS_MIN_CHUNK_MINUTES = 30
+DEFAULT_SOAP_RETRIES = 5
+
+LOGGER = logging.getLogger(__name__)
 
 EVENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "click": {
@@ -177,7 +186,7 @@ class SFMCClient:
             return self._token
 
     async def soap_call(
-        self, action: str, body_inner: str, retries: int = 3
+        self, action: str, body_inner: str, retries: int = DEFAULT_SOAP_RETRIES
     ) -> ET.Element:
         assert self._session is not None
         token = await self._ensure_token()
@@ -209,22 +218,56 @@ class SFMCClient:
                     ) as resp:
                         text = await resp.text()
                         if resp.status != 200:
-                            raise RuntimeError(
+                            error = RuntimeError(
                                 f"SOAP {action} HTTP {resp.status}: {text[:500]}"
                             )
+                            if (
+                                resp.status in RETRYABLE_HTTP_STATUS
+                                and attempt < retries - 1
+                            ):
+                                last_error = error
+                                LOGGER.warning(
+                                    "SOAP %s HTTP %s (attempt %s/%s), retrying",
+                                    action,
+                                    resp.status,
+                                    attempt + 1,
+                                    retries,
+                                )
+                                await asyncio.sleep(min(2 ** attempt, 30))
+                                continue
+                            raise error
                         root = ET.fromstring(text)
                         status_el = root.find(f".//{{{NS}}}OverallStatus")
                         status = status_el.text if status_el is not None else ""
                         if status and status != "OK" and "MoreDataAvailable" not in status:
                             if "Error" in status or status == "Error":
-                                raise RuntimeError(
+                                error = RuntimeError(
                                     f"SOAP {action} failed: {status} — {text[:800]}"
                                 )
+                                if attempt < retries - 1:
+                                    last_error = error
+                                    LOGGER.warning(
+                                        "SOAP %s status %s (attempt %s/%s), retrying",
+                                        action,
+                                        status,
+                                        attempt + 1,
+                                        retries,
+                                    )
+                                    await asyncio.sleep(min(2 ** attempt, 30))
+                                    continue
+                                raise error
                         return root
                 except (aiohttp.ClientError, asyncio.TimeoutError, ET.ParseError) as exc:
                     last_error = exc
                     if attempt < retries - 1:
-                        await asyncio.sleep(2 ** attempt)
+                        LOGGER.warning(
+                            "SOAP %s transport error (attempt %s/%s): %s",
+                            action,
+                            attempt + 1,
+                            retries,
+                            exc,
+                        )
+                        await asyncio.sleep(min(2 ** attempt, 30))
         raise RuntimeError(f"SOAP {action} failed after {retries} attempts: {last_error}")
 
     def _build_date_filter(
@@ -316,9 +359,39 @@ async def _fetch_chunk(
     chunk_start: datetime,
     chunk_end: datetime,
     on_record: Callable[[str, Dict[str, str]], None],
+    min_chunk: timedelta,
 ) -> None:
-    async for row in client.retrieve_events(event_key, chunk_start, chunk_end):
-        on_record(event_key, row)
+    try:
+        async for row in client.retrieve_events(event_key, chunk_start, chunk_end):
+            on_record(event_key, row)
+    except Exception as exc:
+        window = chunk_end - chunk_start
+        if window <= min_chunk:
+            raise RuntimeError(
+                "Failed to fetch {} from {} to {} after splitting to {}-minute windows: {}"
+                .format(
+                    event_key,
+                    chunk_start.isoformat(),
+                    chunk_end.isoformat(),
+                    int(min_chunk.total_seconds() // 60),
+                    exc,
+                )
+            ) from exc
+
+        midpoint = chunk_start + (window / 2)
+        LOGGER.warning(
+            "Retrying %s with smaller windows after error (%s → %s): %s",
+            event_key,
+            chunk_start.isoformat(),
+            chunk_end.isoformat(),
+            exc,
+        )
+        await _fetch_chunk(
+            client, event_key, chunk_start, midpoint, on_record, min_chunk
+        )
+        await _fetch_chunk(
+            client, event_key, midpoint, chunk_end, on_record, min_chunk
+        )
 
 
 async def sync_events_async(
@@ -326,8 +399,12 @@ async def sync_events_async(
     event_ranges: Sequence[Tuple[str, datetime, datetime]],
     on_record: Callable[[str, Dict[str, str]], None],
 ) -> None:
-    concurrency = int(config.get("events_concurrency", 40))
-    chunk_hours = int(config.get("events_chunk_hours", 24))
+    concurrency = int(config.get("events_concurrency", DEFAULT_EVENTS_CONCURRENCY))
+    chunk_hours = int(config.get("events_chunk_hours", DEFAULT_EVENTS_CHUNK_HOURS))
+    min_chunk_minutes = int(
+        config.get("events_min_chunk_minutes", DEFAULT_EVENTS_MIN_CHUNK_MINUTES)
+    )
+    min_chunk = timedelta(minutes=min_chunk_minutes)
 
     tasks: List[Tuple[str, datetime, datetime]] = []
     for event_key, start, end in event_ranges:
@@ -339,10 +416,20 @@ async def sync_events_async(
     if not tasks:
         return
 
+    LOGGER.info(
+        "Starting %s event chunks (chunk_hours=%s, concurrency=%s, min_chunk_minutes=%s)",
+        len(tasks),
+        chunk_hours,
+        concurrency,
+        min_chunk_minutes,
+    )
+
     async with SFMCClient(config, concurrency=concurrency) as client:
         await asyncio.gather(
             *[
-                _fetch_chunk(client, event_key, chunk_start, chunk_end, on_record)
+                _fetch_chunk(
+                    client, event_key, chunk_start, chunk_end, on_record, min_chunk
+                )
                 for event_key, chunk_start, chunk_end in tasks
             ]
         )

@@ -7,8 +7,9 @@
     "batch_size": 2500,
 
     "event_types": "click,open,bounce,unsub",
-    "events_concurrency": 40,
-    "events_chunk_hours": 24,
+    "events_concurrency": 20,
+    "events_chunk_hours": 6,
+    "events_min_chunk_minutes": 30,
 
     "pagination__sent_interval_unit": "minutes",
     "pagination__sent_interval_quantity": "10",
