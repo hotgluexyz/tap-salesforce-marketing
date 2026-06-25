@@ -21,18 +21,23 @@ def _get_subscriber_key(list_subscriber):
 
 
 def _get_list_subscriber_filter(_list, start):
+    # return {
+    #     'LogicalOperator': 'AND',
+    #     'LeftOperand': {
+    #         'Property': 'ListID',
+    #         'SimpleOperator': 'equals',
+    #         'Value': _list.get('ID'),
+    #     },
+    #     'RightOperand': {
+    #         'Property': 'ModifiedDate',
+    #         'SimpleOperator': 'greaterThan',
+    #         'Value': start
+    #     }
+    # }
     return {
-        'LogicalOperator': 'AND',
-        'LeftOperand': {
-            'Property': 'ListID',
-            'SimpleOperator': 'equals',
-            'Value': _list.get('ID'),
-        },
-        'RightOperand': {
-            'Property': 'ModifiedDate',
-            'SimpleOperator': 'greaterThan',
-            'Value': start
-        }
+        'Property': 'ModifiedDate',
+        'SimpleOperator': 'greaterThan',
+        'Value': start
     }
 
 
@@ -110,6 +115,8 @@ class ListSubscriberDataAccessObject(DataAccessObject):
 
         catalog_copy = copy.deepcopy(self.catalog)
 
+        subscribers_keys = set()
+
         for list_subscribers_batch in partition_all(stream, batch_size):
             for list_subscriber in list_subscribers_batch:
                 list_subscriber = self.filter_keys_and_parse(
@@ -124,13 +131,15 @@ class ListSubscriberDataAccessObject(DataAccessObject):
 
                 self.write_records_with_transform(list_subscriber, catalog_copy, table)
 
-            if self.replicate_subscriber:
-                # make the list of subscriber keys
-                subscriber_keys = list(map(
-                    _get_subscriber_key, list_subscribers_batch))
+            if list_subscriber["SubscriberKey"] not in subscribers_keys:
+                subscribers_keys.add(list_subscriber["SubscriberKey"])
+                if self.replicate_subscriber:
+                    # make the list of subscriber keys
+                    subscriber_keys = list(map(
+                        _get_subscriber_key, list_subscribers_batch))
 
-                # pass the list of 'subscriber_keys' to fetch subscriber details
-                subscriber_dao.pull_subscribers_batch(subscriber_keys)
+                    # pass the list of 'subscriber_keys' to fetch subscriber details
+                    subscriber_dao.pull_subscribers_batch(subscriber_keys)
 
             save_state(self.state)
 
