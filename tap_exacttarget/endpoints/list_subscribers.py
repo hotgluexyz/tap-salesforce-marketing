@@ -92,7 +92,7 @@ class ListSubscriberDataAccessObject(DataAccessObject):
 
         catalog_copy = copy.deepcopy(self.catalog)
 
-        subscribers_keys = set()
+        synced_subscribers_keys = set()
 
         for list_subscribers_batch in partition_all(stream, batch_size):
             for list_subscriber in list_subscribers_batch:
@@ -108,15 +108,19 @@ class ListSubscriberDataAccessObject(DataAccessObject):
 
                 self.write_records_with_transform(list_subscriber, catalog_copy, table)
 
-            if list_subscriber["SubscriberKey"] not in subscribers_keys:
-                subscribers_keys.add(list_subscriber["SubscriberKey"])
-                if self.replicate_subscriber:
-                    # make the list of subscriber keys
-                    subscriber_keys = list(map(
-                        _get_subscriber_key, list_subscribers_batch))
+            if self.replicate_subscriber:
+                # make the list of subscriber keys
+                subscriber_keys = list(map(
+                    _get_subscriber_key, list_subscribers_batch))
 
-                    # pass the list of 'subscriber_keys' to fetch subscriber details
-                    subscriber_dao.pull_subscribers_batch(subscriber_keys)
+                # filter out all the subscriber keys that are already in the set
+                subscriber_keys = [key for key in subscriber_keys if key not in synced_subscribers_keys]
+
+                # add the subscriber keys to the set
+                synced_subscribers_keys.update(subscriber_keys)
+
+                # pass the list of 'subscriber_keys' to fetch subscriber details
+                subscriber_dao.pull_subscribers_batch(subscriber_keys)
 
             save_state(self.state)
 
