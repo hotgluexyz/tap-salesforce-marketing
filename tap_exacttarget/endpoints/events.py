@@ -1,13 +1,15 @@
-import FuelSDK
 import copy
+from datetime import datetime, timezone
+
 import singer
 
-from tap_exacttarget.client import request
-from tap_exacttarget.dao import (DataAccessObject, exacttarget_error_handling)
-from tap_exacttarget.pagination import get_date_page, before_now, \
-    increment_date
-from tap_exacttarget.state import incorporate, save_state, \
-    get_last_record_value_for_table
+from tap_exacttarget.dao import DataAccessObject, exacttarget_error_handling
+from tap_exacttarget.sfmc_events_client import (
+    EVENT_TYPE_DEFAULTS,
+    parse_event_types,
+    sync_events,
+)
+from tap_exacttarget.state import incorporate, save_state, get_last_record_value_for_table
 
 
 LOGGER = singer.get_logger()
@@ -20,72 +22,90 @@ class EventDataAccessObject(DataAccessObject):
     REPLICATION_METHOD = 'INCREMENTAL'
     REPLICATION_KEYS = ['EventDate']
 
+    def filter_keys_and_parse(self, obj):
+        return self.parse_object(obj)
+
+    def _normalize_record(self, event_key, row):
+        record = dict(row)
+
+        if not record.get('EventType'):
+            record['EventType'] = EVENT_TYPE_DEFAULTS.get(event_key, event_key)
+
+        for int_field in ('SendID', 'BatchID'):
+            value = record.get(int_field)
+            if value is not None and value != '':
+                try:
+                    record[int_field] = int(value)
+                except (TypeError, ValueError):
+                    pass
+
+        return record
+
     @exacttarget_error_handling
     def sync_data(self):
         table = self.__class__.TABLE
-        endpoints = {
-            'sent': FuelSDK.ET_SentEvent,
-            'click': FuelSDK.ET_ClickEvent,
-            'open': FuelSDK.ET_OpenEvent,
-            'bounce': FuelSDK.ET_BounceEvent,
-            'unsub': FuelSDK.ET_UnsubEvent
-        }
+        event_types = parse_event_types(self.config)
 
-        for event_name, selector in endpoints.items():
-            search_filter = None
+        if not self.config.get('sub_domain'):
+            raise RuntimeError(
+                'sub_domain is required for the event stream '
+                '(direct SOAP retrieval uses OAuth2 tenant endpoints).'
+            )
 
-            # pass config to return start date if not bookmark is found
-            start = get_last_record_value_for_table(self.state, event_name, self.config)
+        catalog_copy = copy.deepcopy(self.catalog)
+        end = datetime.now(timezone.utc)
+        event_ranges = []
 
+        for event_key in event_types:
+            start = get_last_record_value_for_table(self.state, event_key, self.config)
             if start is None:
                 raise RuntimeError('start_date not defined!')
+            event_ranges.append((event_key, start, end))
+            LOGGER.info(
+                "Queued %s from %s to %s",
+                event_key,
+                start,
+                end.isoformat(),
+            )
 
-            pagination_unit = self.config.get(
-                'pagination__{}_interval_unit'.format(event_name), 'minutes')
-            pagination_quantity = self.config.get(
-                'pagination__{}_interval_quantity'.format(event_name), 10)
+        LOGGER.info(
+            "Fetching event types %s (chunk_hours=%s, concurrency=%s, min_chunk_minutes=%s)",
+            ", ".join(event_types),
+            self.config.get('events_chunk_hours', 6),
+            self.config.get('events_concurrency', 20),
+            self.config.get('events_min_chunk_minutes', 30),
+        )
 
-            unit = {pagination_unit: int(pagination_quantity)}
+        def on_record(event_key, row):
+            record = self._normalize_record(event_key, row)
 
-            end = increment_date(start, unit)
+            self.state = incorporate(
+                self.state,
+                event_key,
+                'EventDate',
+                record.get('EventDate'),
+            )
 
-            while before_now(start):
-                LOGGER.info("Fetching {} from {} to {}"
-                            .format(event_name, start, end))
+            if record.get('SubscriberKey') is None:
+                LOGGER.info(
+                    "SubscriberKey is NULL so ignoring %s record with SendID: %s and EventDate: %s",
+                    event_key,
+                    record.get('SendID'),
+                    record.get('EventDate'),
+                )
+                return
 
-                search_filter = get_date_page('EventDate', start, unit)
+            self.write_records_with_transform(record, catalog_copy, table)
 
-                stream = request(event_name,
-                                 selector,
-                                 self.auth_stub,
-                                 search_filter,
-                                 batch_size=self.batch_size)
+        sync_events(self.config, event_ranges, on_record)
 
-                catalog_copy = copy.deepcopy(self.catalog)
+        end_str = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for event_key in event_types:
+            self.state = incorporate(self.state, event_key, 'EventDate', end_str)
 
-                for event in stream:
-                    event = self.filter_keys_and_parse(event)
+        save_state(self.state)
 
-                    self.state = incorporate(self.state,
-                                             event_name,
-                                             'EventDate',
-                                             event.get('EventDate'))
-
-                    if event.get('SubscriberKey') is None:
-                        LOGGER.info("SubscriberKey is NULL so ignoring {} record with SendID: {} and EventDate: {}"
-                                    .format(event_name,
-                                            event.get('SendID'),
-                                            event.get('EventDate')))
-                        continue
-
-                    self.write_records_with_transform(event, catalog_copy, table)
-
-                self.state = incorporate(self.state,
-                                         event_name,
-                                         'EventDate',
-                                         start)
-
-                save_state(self.state)
-
-                start = end
-                end = increment_date(start, unit)
+        LOGGER.info(
+            "Completed event sync for types: %s",
+            ", ".join(event_types),
+        )

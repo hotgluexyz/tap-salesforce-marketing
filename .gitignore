@@ -104,3 +104,5 @@ ENV/
 .tramp_history
 config.json
 catalog.json
+.secrets/
+sfmc-testing/
